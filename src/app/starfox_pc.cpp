@@ -6,6 +6,7 @@
 #include "starfox/assets/rom.hpp"
 #include "starfox/assets/runtime_bundle.hpp"
 #include "starfox/assets/shape_decoder.hpp"
+#include "starfox/gfx/render_backend.hpp"
 #include "starfox/input/buttons.hpp"
 #include "starfox/input/input_latch.hpp"
 #include "starfox/render/framebuffer.hpp"
@@ -179,6 +180,23 @@ constexpr std::array<std::string_view,
     "9X",
     "10X",
 }};
+
+// SDL returns a function pointer; graphics loaders traffic in void*.
+void* load_gl_symbol(const char* name) {
+    return reinterpret_cast<void*>(SDL_GL_GetProcAddress(name));
+}
+
+std::string_view renderer_kind_name(
+    starfox::simulation::RendererKind kind) noexcept {
+    return kind == starfox::simulation::RendererKind::opengl
+        ? "OPENGL" : "SOFTWARE";
+}
+
+std::string_view renderer_backend_name(
+    starfox::simulation::RendererKind kind) noexcept {
+    return kind == starfox::simulation::RendererKind::opengl
+        ? "opengl" : "software";
+}
 
 std::uint32_t render_scale_index(
     starfox::simulation::RenderScale scale) noexcept {
@@ -2390,6 +2408,82 @@ int main(int argc, char** argv) {
         if (launch_hud_editor_preview) {
             initial_map = "LEVEL1_1";
         }
+        std::unique_ptr<starfox::gfx::RenderBackend> render_backend;
+        auto active_renderer_kind = starfox::simulation::RendererKind::software;
+        bool reported_renderer_fallback = false;
+        // What this port asks of any backend that draws its scene. It
+        // composites its layers, post-processes them and fades them as
+        // palette indices, and ENHANCED TEXTURES, SMOOTH POLYS and RTX
+        // LIGHTING read the surface record the fill step writes. A backend
+        // that cannot return both cannot stand in for the built-in fill,
+        // whatever else it draws well, so it is refused here rather than
+        // discovered as a blank screen or three dead options.
+        const auto backend_serves_this_port =
+            [](const starfox::gfx::Capabilities& capabilities) {
+                return capabilities.indexed_readback
+                    && capabilities.surface_attributes;
+            };
+        const auto select_render_backend =
+            [&render_backend, &active_renderer_kind, &reported_renderer_fallback,
+                &backend_serves_this_port](
+                starfox::simulation::RendererKind kind) {
+                // A device backend may only run on a context this runtime
+                // created. SDL's own renderer is usually OpenGL and caches
+                // the state it set, so building on that same context corrupts
+                // what it cached and crashes the driver later. A context
+                // existing is not permission to use it. This flips when
+                // presentation moves off SDL_Renderer.
+                constexpr bool runtime_owns_graphics_context = false;
+                const auto fall_back_to_software = [&] {
+                    active_renderer_kind =
+                        starfox::simulation::RendererKind::software;
+                    render_backend =
+                        starfox::gfx::make_render_backend("software");
+                    if (render_backend != nullptr) {
+                        static_cast<void>(render_backend->initialise({}));
+                    }
+                };
+                active_renderer_kind = kind;
+                if (kind != starfox::simulation::RendererKind::software
+                    && !runtime_owns_graphics_context) {
+                    if (!reported_renderer_fallback) {
+                        reported_renderer_fallback = true;
+                        std::cerr << "starfox_pc: the "
+                                  << renderer_kind_name(kind)
+                                  << " renderer is not driving presentation in"
+                                     " this build; using SOFTWARE\n";
+                    }
+                    active_renderer_kind =
+                        starfox::simulation::RendererKind::software;
+                }
+                render_backend = starfox::gfx::make_render_backend(
+                    renderer_backend_name(active_renderer_kind));
+                if (render_backend == nullptr) return;
+                starfox::gfx::BackendInit init;
+                if (active_renderer_kind
+                    != starfox::simulation::RendererKind::software) {
+                    init.load_symbol = &load_gl_symbol;
+                }
+                if (!render_backend->initialise(init)) {
+                    std::cerr << "starfox_pc: the "
+                              << renderer_kind_name(active_renderer_kind)
+                              << " renderer could not start ("
+                              << render_backend->last_error()
+                              << "); using SOFTWARE instead\n";
+                    fall_back_to_software();
+                    return;
+                }
+                if (backend_serves_this_port(render_backend->capabilities())) {
+                    return;
+                }
+                std::cerr << "starfox_pc: the "
+                          << renderer_kind_name(active_renderer_kind)
+                          << " renderer cannot return the indexed scene and"
+                             " surface record this port draws through; using"
+                             " SOFTWARE instead\n";
+                render_backend->shutdown();
+                fall_back_to_software();
+            };
         while (restart_runtime) {
         restart_runtime = false;
         const auto hud_editor_preview =
@@ -2452,6 +2546,7 @@ int main(int argc, char** argv) {
                 static_cast<std::uint8_t>(game.crosshair_colour()),
                 static_cast<std::uint8_t>(game.experience()),
                 static_cast<std::uint8_t>(game.render_scale()),
+                static_cast<std::uint8_t>(game.renderer_kind()),
             };
         };
         {
@@ -2535,6 +2630,17 @@ int main(int argc, char** argv) {
                             factor - 1));
                 }
             }
+            game.set_renderer_kind(
+                static_cast<starfox::simulation::RendererKind>(
+                    saved_pregame.renderer_kind));
+            if (const auto* forced_renderer = std::getenv(
+                    "STARFOX_TEST_RENDERER")) {
+                game.set_renderer_kind(
+                    std::string_view{forced_renderer} == "opengl"
+                        ? starfox::simulation::RendererKind::opengl
+                        : starfox::simulation::RendererKind::software);
+            }
+            select_render_backend(game.renderer_kind());
             game.set_experience(active_experience);
             if (hud_editor_preview) {
                 // Build the editor's static reference image from a genuine
@@ -3639,7 +3745,7 @@ int main(int argc, char** argv) {
                                    == starfox::simulation::GameFlowState::pregame_menu
                                && game.pregame_page()
                                    == starfox::simulation::PregamePage::options
-                               && game.pregame_selection() == 4U
+                               && game.pregame_selection() == 5U
                                && (controls.pressed
                                    & (starfox::input::a
                                       | starfox::input::select)) != 0U) {
@@ -3677,6 +3783,9 @@ int main(int argc, char** argv) {
                     synchronize_ex_save();
                     if (capture_pregame_settings() != settings_before_tick) {
                         save_pregame_settings();
+                    }
+                    if (game.renderer_kind() != active_renderer_kind) {
+                        select_render_backend(game.renderer_kind());
                     }
                     if (game.experience() != active_experience) {
                         active_experience = game.experience();
@@ -5069,8 +5178,8 @@ int main(int argc, char** argv) {
                             ? std::string_view{"ON"} : std::string_view{"OFF"};
                         const auto crosshair = crosshair_colour_name(
                             game.crosshair_colour());
-                        constexpr std::array<std::int32_t, 6> option_y{
-                            56, 76, 96, 116, 136, 162};
+                        constexpr std::array<std::int32_t, 7> option_y{
+                            56, 74, 92, 110, 128, 146, 168};
                         draw_row("GOD MODE", god_value, option_y[0],
                             game.pregame_selection() == 0U);
                         draw_row("ON-SCREEN FPS", fps_value, option_y[1],
@@ -5080,12 +5189,15 @@ int main(int argc, char** argv) {
                         draw_row("RENDER SCALE",
                             render_scale_name(game.render_scale()),
                             option_y[3], game.pregame_selection() == 3U);
-                        draw_row("CUSTOMIZE SCREEN", "A  OPEN", option_y[4],
-                            game.pregame_selection() == 4U);
-                        draw_row("BACK", "", option_y[5],
+                        draw_row("RENDERER",
+                            renderer_kind_name(game.renderer_kind()),
+                            option_y[4], game.pregame_selection() == 4U);
+                        draw_row("CUSTOMIZE SCREEN", "A  OPEN", option_y[5],
                             game.pregame_selection() == 5U);
-                        constexpr std::array<std::int32_t, 6> cursor_y{
-                            59, 79, 99, 119, 139, 165};
+                        draw_row("BACK", "", option_y[6],
+                            game.pregame_selection() == 6U);
+                        constexpr std::array<std::int32_t, 7> cursor_y{
+                            59, 77, 95, 113, 131, 149, 171};
                         draw_cursor(cursor_y[game.pregame_selection()]);
                         draw_centred("A/LEFT/RIGHT  CHANGE", 180, 13U);
                         draw_centred("B  BACK", 194, 13U);

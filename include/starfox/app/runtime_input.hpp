@@ -94,6 +94,7 @@ struct PregameSettings {
     std::uint8_t crosshair_colour{};
     std::uint8_t experience{};
     std::uint8_t render_scale{};
+    std::uint8_t renderer_kind{};
 
     [[nodiscard]] bool operator==(const PregameSettings&) const = default;
 };

@@ -79,6 +79,16 @@ enum class RenderScale : std::uint8_t {
 
 inline constexpr std::size_t render_scale_count = 10U;
 
+// Which technology draws the world. Listed here so the simulation stays
+// independent of the graphics layer; the runtime maps a choice onto an
+// available backend and falls back when one is not built in.
+enum class RendererKind : std::uint8_t {
+    software,
+    opengl,
+};
+
+inline constexpr std::size_t renderer_kind_count = 2U;
+
 enum class PregamePage {
     main,
     options,
@@ -300,6 +310,12 @@ public:
     }
     void set_render_scale(RenderScale scale) noexcept {
         render_scale_ = scale;
+    }
+    [[nodiscard]] RendererKind renderer_kind() const noexcept {
+        return renderer_kind_;
+    }
+    void set_renderer_kind(RendererKind kind) noexcept {
+        renderer_kind_ = kind;
     }
     void set_secondary_inputs(
         std::span<const input::TickInput> controllers) noexcept;
@@ -860,6 +876,7 @@ private:
     bool rumble_{true};
     CrosshairColour crosshair_colour_{CrosshairColour::green};
     RenderScale render_scale_{RenderScale::scale_1x};
+    RendererKind renderer_kind_{RendererKind::software};
     bool planet_travel_complete_{};
     bool planet_arrival_confirmation_required_{};
     std::uint8_t stage_percentage_{};

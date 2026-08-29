@@ -75,6 +75,27 @@ resolve polygon edges at the selected scale instead of the source grid. Their
 cost grows with it, and the surface samples the last three read are only
 allocated while one of them is on.
 
+`RENDERER` names the technology that fills shapes and stacks layers. The whole
+graphics-API surface of the port sits behind one small interface, so adding a
+technology is one file and one registry entry rather than a rewrite; `SOFTWARE`
+and `OPENGL` ship today. What reaches a backend is already projected, already
+clipped and already in the order the cartridge chose, measured in source pixels
+with the fraction kept, and the backend applies `RENDER SCALE` when it fills.
+It also returns the frame as palette indices and, when one of the three
+surface-driven effects is on, the polygon normal and camera depth behind every
+pixel, because that is what the port composites, fades and post-processes. A
+backend that cannot return both is refused at start-up and `SOFTWARE` draws
+instead, with a note on standard error.
+
+A device backend may only run on a graphics context this runtime created.
+SDL's own renderer is usually OpenGL and remembers the state it set, so
+building on that same context corrupts what it cached and crashes the driver
+later somewhere unrelated; a context existing is not permission to use it. This
+runtime does not own one yet, so the choice is remembered and saved but the
+software path keeps drawing. It starts working when presentation moves off
+SDL's renderer. `STARFOX_TEST_RENDERER` forces the choice for testing, matching
+the hooks the other presentation settings have.
+
 `CUSTOMIZE SCREEN` opens a mouse-driven captured native-gameplay HUD preview
 using the game's actual HUD artwork. Lives, Shield, Bombs/Boost, Comms, and the
 Boss Health bar can each be dragged independently; `RESET` (or Y) restores the
@@ -83,8 +104,10 @@ current display mode's defaults. Layouts are independent for 4:3,
 for every size. They save automatically to
 `Documents/Star Fox Enhanced/hud-layout.cfg`.
 Game pace, render FPS, display mode, MSU-1 music, rumble, God Mode, the FPS
-counter, and crosshair colour also persist in
-`Documents/Star Fox Enhanced/pregame.cfg`. Keyboard and
+counter, crosshair colour, render scale, and renderer also persist in
+`Documents/Star Fox Enhanced/pregame.cfg`. It records the revision that wrote
+it, and revisions are compared by number, so a file from an older build still
+loads and adding a further option cannot break that. Keyboard and
 controller remaps are saved automatically when the remapping screen closes.
 Standard display uses the complete 256x224 raster; Widescreen 16:9,
 Widescreen 16:10, Ultrawide 21:9, and Super Ultrawide 32:9 expand the intro
