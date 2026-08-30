@@ -9,6 +9,9 @@
 #include "starfox/gfx/render_backend.hpp"
 #include "starfox/input/buttons.hpp"
 #include "starfox/input/input_latch.hpp"
+#if defined(__SWITCH__)
+#include "starfox/platform/switch_runtime.hpp"
+#endif
 #include "starfox/render/framebuffer.hpp"
 #include "starfox/render/background_renderer.hpp"
 #include "starfox/render/dust_renderer.hpp"
@@ -52,7 +55,7 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#else
+#elif !defined(__SWITCH__)
 #include <fcntl.h>
 #include <sys/file.h>
 #include <unistd.h>
@@ -776,7 +779,9 @@ RuntimeAssetSet load_or_compile_runtime_assets(
 // argv[0] is only a resolvable path when the runtime was launched by one; the
 // companion and its side files must still land beside the real executable.
 std::filesystem::path executable_path(const char* argv0) {
-#if !defined(_WIN32)
+#if defined(__SWITCH__)
+    return starfox::platform::switch_runtime::executable_path(argv0);
+#elif !defined(_WIN32)
     std::error_code error;
     auto resolved = std::filesystem::read_symlink("/proc/self/exe", error);
     if (!error) return resolved;
@@ -810,9 +815,17 @@ public:
 class Window {
 public:
     Window() {
+#if defined(__SWITCH__)
+        const auto config = starfox::platform::switch_runtime::window_config();
+        if (!SDL_CreateWindowAndRenderer(
+                "Star Fox Enhanced", config.width, config.height,
+                SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL,
+                &window_, &renderer_)) {
+#else
         if (!SDL_CreateWindowAndRenderer(
                 "Star Fox Enhanced - native PC runtime", 1024, 896,
                 SDL_WINDOW_RESIZABLE, &window_, &renderer_)) {
+#endif
             throw std::runtime_error{
                 std::string{"SDL_CreateWindowAndRenderer: "} + SDL_GetError()};
         }
@@ -1821,9 +1834,11 @@ private:
                 std::string{"SDL_SetRenderLogicalPresentation: "}
                 + SDL_GetError()};
         }
+#if !defined(__SWITCH__)
         if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) == 0U) {
             set_windowed_size(width, height);
         }
+#endif
         texture_width_ = width;
         texture_height_ = height;
     }
@@ -2389,6 +2404,10 @@ CameraPoint world_to_camera(
 } // namespace
 
 int main(int argc, char** argv) {
+#if defined(__SWITCH__)
+    const auto* executable = argc > 0 ? argv[0] : nullptr;
+    starfox::platform::switch_runtime::clear_startup_error(executable);
+#else
     // Keep the lock alive through the catch block and its modal error dialog.
     // If it lived inside try, stack unwinding released it before the dialog;
     // a second launch could then enter and display an identical second box.
@@ -2428,6 +2447,7 @@ int main(int argc, char** argv) {
             }
         }
     }
+#endif
 #endif
     try {
         const SdlContext sdl;
@@ -3823,6 +3843,25 @@ int main(int argc, char** argv) {
                 }
                 if (game.logic_tick_ready()) {
                     auto controls = input.consume();
+#if defined(__SWITCH__)
+                    // Escape opens the exit confirmation on desktop. The
+                    // Switch has no keyboard, so Select+Start reaches it
+                    // instead; the combination is otherwise unused in game.
+                    constexpr auto exit_combination = static_cast<
+                        starfox::input::ButtonMask>(
+                        starfox::input::select | starfox::input::start);
+                    if (!hud_editor.active && !remap_menu.active
+                        && (controls.held & exit_combination)
+                            == exit_combination
+                        && (controls.pressed & exit_combination) != 0U) {
+                        exit_confirmation = true;
+                        // Match the keyboard path: default to the
+                        // non-destructive choice and swallow the combination
+                        // so the game never sees it as a pause or select.
+                        exit_yes_selected = false;
+                        controls = {};
+                    }
+#endif
                     std::array<starfox::input::TickInput, 4>
                         secondary_controls{};
                     for (std::size_t player = 0;
@@ -5686,16 +5725,23 @@ int main(int argc, char** argv) {
         }
         return 0;
     } catch (const std::exception& error) {
+#if defined(__SWITCH__)
+        starfox::platform::switch_runtime::report_startup_error(
+            executable, error.what());
+#else
         const std::string message =
             std::string{"Star Fox Enhanced could not start:\n\n"} + error.what();
+#endif
         std::cerr << "starfox_pc failed: " << error.what() << '\n';
         // Automated runtime checks must remain headless even when they find a
         // regression; stderr and the non-zero exit status are sufficient and
         // cannot strand modal dialogs on the user's desktop.
+#if !defined(__SWITCH__)
         if (std::getenv("STARFOX_TEST_FRAMES") == nullptr) {
             static_cast<void>(SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
                 "Star Fox Enhanced", message.c_str(), nullptr));
         }
+#endif
         return 1;
     }
 }

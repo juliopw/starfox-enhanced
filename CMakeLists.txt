@@ -212,13 +212,19 @@ if(STARFOX_BUILD_RUNTIME)
     set(SDL_SHARED OFF CACHE BOOL "Avoid a runtime SDL DLL" FORCE)
     set(SDL_STATIC ON CACHE BOOL "Link SDL into the native executable" FORCE)
     set(SDL_TEST_LIBRARY OFF CACHE BOOL "Do not build the SDL test library" FORCE)
-    FetchContent_Declare(
-        SDL3
-        URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.14/SDL3-3.4.14.tar.gz
-        URL_HASH SHA256=30d4aa2b3037718142b32dffd4e72f917ebb6cc5227150e7bb9c45efb2153aeb
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-    FetchContent_MakeAvailable(SDL3)
+    if(NINTENDO_SWITCH)
+        set(SDL_OPENGL OFF CACHE BOOL "Disable desktop OpenGL on Switch" FORCE)
+        set(SDL_OPENGLES ON CACHE BOOL "Use OpenGL ES on Switch" FORCE)
+        add_subdirectory(third_party/switch/SDL EXCLUDE_FROM_ALL)
+    else()
+        FetchContent_Declare(
+            SDL3
+            URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.14/SDL3-3.4.14.tar.gz
+            URL_HASH SHA256=30d4aa2b3037718142b32dffd4e72f917ebb6cc5227150e7bb9c45efb2153aeb
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        )
+        FetchContent_MakeAvailable(SDL3)
+    endif()
 
     add_executable(starfox_pc
         src/app/starfox_pc.cpp
@@ -360,6 +366,11 @@ ${STARFOX_RETAIL_EUROPE_V11_PATCH};${STARFOX_RETAIL_GERMANY_V10_PATCH}")
     endif()
     if(MINGW)
         target_link_options(starfox_pc PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    if(NINTENDO_SWITCH)
+        target_sources(starfox_pc PRIVATE src/platform/switch/runtime.cpp)
+        include(cmake/platforms/NintendoSwitch.cmake)
+        starfox_add_switch_nro(starfox_pc)
     endif()
 
     install(TARGETS starfox_pc RUNTIME DESTINATION .)

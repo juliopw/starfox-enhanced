@@ -138,7 +138,13 @@ std::filesystem::path documents_settings_path(std::string_view filename) {
             / "Documents" / "Star Fox Enhanced" / filename;
     }
 #endif
+#if defined(__SWITCH__)
+    const auto directory = preference_directory();
+    return directory.empty() ? std::filesystem::path{}
+                             : directory / filename;
+#else
     return {};
+#endif
 }
 
 constexpr std::array<std::string_view, 5> kHudElementNames{

@@ -101,3 +101,32 @@ MSUPCM++. Original Star Fox compositions remain credited to Hajime Hirasawa.
 No standalone licence file is included by the pinned music-pack repository;
 this notice records provenance and attribution and does not alter any rights
 in the music or the underlying game.
+## SDL Nintendo Switch port
+
+Source: <https://github.com/devkitPro/SDL>
+
+Pinned revision: `c329016c0e338ab4397ad930f83330c9fe058348`
+
+Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
+
+Licensed under the zlib license reproduced in the SDL 3.4.14 notice above.
+
+## libnx
+
+Source: <https://github.com/switchbrew/libnx>
+
+Pinned revision: `dbcc1beafc6b47b5ffbeb8ba82463a7d45da40bb`
+
+Copyright 2017-2018 libnx Authors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.

@@ -3,3 +3,9 @@
 	url = https://github.com/Sunlitspace542/ultrastarfox.git
 	# The DOS assembler writes its outputs into the checkout.
 	ignore = untracked
+[submodule "third_party/switch/libnx"]
+	path = third_party/switch/libnx
+	url = https://github.com/switchbrew/libnx.git
+[submodule "third_party/switch/SDL"]
+	path = third_party/switch/SDL
+	url = https://github.com/devkitPro/SDL.git

@@ -1,6 +1,6 @@
 # Star Fox Enhanced
 
-A native Windows and Linux PC port of the open-source
+A native Windows, Linux, and Nintendo Switch port of the open-source
 [UltraStarFox](https://github.com/Sunlitspace542/ultrastarfox) codebase. It
 presents at a selectable 20, 30, 60, 90, 120, 240, 360, or 480 frames per
 second while preserving the original game's intended NTSC simulation speed
@@ -248,6 +248,25 @@ build/release/starfox_pc LEVEL2_3
 build/release/starfox_pc path/to/SF.SFC path/to/SYMBOLS.TXT TITLEMAP
 ```
 
+### Nintendo Switch
+
+Install the devkitPro `switch-dev` group, build the source assets described
+above, then run:
+
+```bash
+export DEVKITPRO=/opt/devkitpro
+tools/build_switch.sh
+```
+
+Copy the contents of `build/switch/sdcard` to the SD-card root. When patches
+and symbols are embedded, add a supported retail ROM beside the NRO for the
+first launch. Otherwise the package includes the available source-built ROM
+and symbol files. The optional `Starfox-MSU1.PAK` soundtrack companion is
+packaged beside the NRO whenever `STARFOX_PACKAGE_MSU1_MUSIC` is enabled.
+Runtime assets and settings are created in the same folder.
+Switch-only libraries are pinned under `third_party/switch`; the desktop build
+does not use them.
+
 ## Controls
 
 | SNES | Keyboard | Gamepad |
@@ -262,7 +281,8 @@ build/release/starfox_pc path/to/SF.SFC path/to/SYMBOLS.TXT TITLEMAP
 | Start | Enter | Start/Menu |
 
 Escape opens an exit-confirmation dialog. Select+Start remains available to
-the game and never exits the PC runtime.
+the game and never exits the PC runtime. The Switch has no keyboard, so there
+Select+Start opens that same dialog instead of reaching the game.
 
 F5 toggles the presentation debugger. While frozen, F6 advances one selected
 render frame and F7 walks backward through the retained final-frame history.
