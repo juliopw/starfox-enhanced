@@ -160,6 +160,27 @@ else()
     target_compile_options(starfox_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# Graphics backends. Nothing here names a windowing library or a platform, so
+# a new technology is one translation unit plus one registry entry.
+option(STARFOX_ENABLE_OPENGL "Build the OpenGL render backend" ON)
+add_library(starfox_gfx
+    src/gfx/render_backend.cpp
+    src/gfx/software_backend.cpp
+)
+target_include_directories(starfox_gfx PUBLIC include)
+target_compile_features(starfox_gfx PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(starfox_gfx PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(starfox_gfx PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+if(STARFOX_ENABLE_OPENGL)
+    # No OpenGL headers and no import library: the backend resolves its own
+    # entry points, which lets the same file serve GLES and consoles.
+    target_sources(starfox_gfx PRIVATE src/gfx/gl/gl_backend.cpp)
+    target_compile_definitions(starfox_gfx PRIVATE STARFOX_ENABLE_OPENGL=1)
+endif()
+
 add_executable(starfox_timing_demo src/app/timing_demo.cpp)
 target_link_libraries(starfox_timing_demo PRIVATE starfox_core)
 
@@ -202,6 +223,7 @@ if(STARFOX_BUILD_RUNTIME)
     add_executable(starfox_pc
         src/app/starfox_pc.cpp
         src/app/runtime_input.cpp)
+    target_link_libraries(starfox_pc PRIVATE starfox_gfx)
     if(WIN32)
         # The packaged runtime reports failures through a native message box;
         # it should not open a second console window beside the game.
@@ -407,8 +429,15 @@ if(STARFOX_BUILD_TESTS)
     add_test(NAME starfox_msu1_pack_tests COMMAND starfox_msu1_pack_tests)
 
     add_executable(starfox_shape_decoder_tests tests/shape_decoder_tests.cpp)
-    target_link_libraries(starfox_shape_decoder_tests PRIVATE starfox_core)
+    # The reference backend is the yardstick the renderer's emitted faces are
+    # measured against, so this suite links both layers.
+    target_link_libraries(starfox_shape_decoder_tests
+        PRIVATE starfox_core starfox_gfx)
     add_test(NAME starfox_shape_decoder_tests COMMAND starfox_shape_decoder_tests)
+
+    add_executable(starfox_gfx_tests tests/gfx_tests.cpp)
+    target_link_libraries(starfox_gfx_tests PRIVATE starfox_gfx)
+    add_test(NAME starfox_gfx_tests COMMAND starfox_gfx_tests)
 
     add_executable(starfox_simulation_tests tests/simulation_tests.cpp)
     target_link_libraries(starfox_simulation_tests PRIVATE starfox_core)

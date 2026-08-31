@@ -306,6 +306,78 @@ std::vector<RasterVertex> clip_screen_edge(
     return output;
 }
 
+// Scan conversion is the only stage that follows the render scale. Projection,
+// visibility and clipping all stay on the source raster, so a scaled frame
+// resolves exactly the same geometry with finer scan lines.
+class StoredRasterScope {
+public:
+    StoredRasterScope(Framebuffer& target, std::uint32_t scale) noexcept
+        : target_(target), previous_(target.draw_scale()) {
+        if (scale > 1U) target_.set_draw_scale(1U);
+    }
+    ~StoredRasterScope() { target_.set_draw_scale(previous_); }
+    StoredRasterScope(const StoredRasterScope&) = delete;
+    StoredRasterScope& operator=(const StoredRasterScope&) = delete;
+
+private:
+    Framebuffer& target_;
+    std::uint32_t previous_;
+};
+
+gfx::Colour to_draw_colour(const FaceColour& colour) noexcept {
+    return {colour.even, colour.odd, colour.dither};
+}
+
+void emit_line(PrimitiveSink& sink, const ScreenPoint& a, const ScreenPoint& b,
+    const FaceColour& colour) {
+    gfx::Primitive primitive;
+    primitive.kind = gfx::PrimitiveKind::line;
+    primitive.colour = to_draw_colour(colour);
+    primitive.position[0] = {static_cast<float>(a.x), static_cast<float>(a.y)};
+    primitive.position[1] = {static_cast<float>(b.x), static_cast<float>(b.y)};
+    sink.add(primitive);
+}
+
+// A clipped source face is convex, so a fan from its first corner covers it
+// without the backend needing to understand polygons.
+//
+// The record travels with every triangle of the fan: the source shades a face
+// flat, so what the built-in fill writes across the whole polygon is what each
+// piece of it carries.
+void emit_polygon(PrimitiveSink& sink, const std::vector<RasterVertex>& polygon,
+    const FaceColour& colour, const assets::TextureImage* texture,
+    const gfx::SurfaceAttributes& surface) {
+    if (polygon.size() < 3U) return;
+    const auto handle = texture == nullptr
+        ? gfx::TextureHandle{} : sink.texture_for(*texture);
+    for (std::size_t index = 1U; index + 1U < polygon.size(); ++index) {
+        gfx::Primitive primitive;
+        primitive.kind = handle.valid()
+            ? gfx::PrimitiveKind::textured_triangle
+            : gfx::PrimitiveKind::triangle;
+        primitive.colour = to_draw_colour(colour);
+        primitive.texture = handle;
+        primitive.surface = surface;
+        const RasterVertex* corner[3] = {
+            &polygon[0], &polygon[index], &polygon[index + 1U]};
+        for (std::size_t vertex = 0; vertex < 3U; ++vertex) {
+            primitive.position[vertex] = {
+                static_cast<float>(corner[vertex]->point.x),
+                static_cast<float>(corner[vertex]->point.y)};
+            primitive.texture_coordinate[vertex] = {
+                static_cast<float>(corner[vertex]->texture.u),
+                static_cast<float>(corner[vertex]->texture.v)};
+        }
+        sink.add(primitive);
+    }
+}
+
+void scale_to_stored(ScreenPoint& point, std::uint32_t scale) noexcept {
+    if (scale <= 1U) return;
+    point.x *= static_cast<double>(scale);
+    point.y *= static_cast<double>(scale);
+}
+
 std::vector<RasterVertex> clip_screen_polygon(
     std::vector<RasterVertex> polygon,
     const Framebuffer& target,
@@ -1498,8 +1570,17 @@ void SoftwareRenderer::draw(
                     const auto material = face_material(shape, shape.faces.front(),
                         pose.colour_frame, depth_band, light, pose,
                         next_colour_warp_word());
-                    draw_line(target, near_screen, far_screen, material.colour,
-                        settings_.colour_index_base);
+                    if (settings_.sink != nullptr) {
+                        emit_line(*settings_.sink, near_screen, far_screen,
+                            material.colour);
+                    } else {
+                        const StoredRasterScope raster{
+                            target, settings_.render_scale};
+                        scale_to_stored(near_screen, settings_.render_scale);
+                        scale_to_stored(far_screen, settings_.render_scale);
+                        draw_line(target, near_screen, far_screen,
+                            material.colour, settings_.colour_index_base);
+                    }
                 }
             }
         }
@@ -1631,7 +1712,13 @@ void SoftwareRenderer::draw(
         }
 
         auto surface = SurfaceSample{};
-        if (surfaces != nullptr) {
+        // Either consumer wants the same face record: the built-in fill
+        // writes it per pixel, a recording sink hands it to the backend that
+        // will. Working it out costs a rotation and a square root per face,
+        // so neither pays for it when nothing reads it.
+        const auto record_surface = surfaces != nullptr
+            || (settings_.sink != nullptr && settings_.sink->records_surfaces());
+        if (record_surface) {
             auto normal_pose = pose;
             normal_pose.x = 0.0;
             normal_pose.y = 0.0;
@@ -1685,6 +1772,14 @@ void SoftwareRenderer::draw(
                     polygon[0], polygon[1], target, pose.use_rotation_matrix)) {
                 continue;
             }
+            if (settings_.sink != nullptr) {
+                emit_line(*settings_.sink, polygon[0], polygon[1],
+                    material.colour);
+                continue;
+            }
+            const StoredRasterScope raster{target, settings_.render_scale};
+            scale_to_stored(polygon[0], settings_.render_scale);
+            scale_to_stored(polygon[1], settings_.render_scale);
             draw_line(target, polygon[0], polygon[1], material.colour,
                 settings_.colour_index_base);
             continue;
@@ -1714,6 +1809,20 @@ void SoftwareRenderer::draw(
         raster_polygon = clip_screen_polygon(
             std::move(raster_polygon), target, pose.use_rotation_matrix);
         if (raster_polygon.size() < 3U) continue;
+        if (settings_.sink != nullptr) {
+            auto attributes = gfx::SurfaceAttributes{};
+            if (record_surface) {
+                attributes = {surface.normal_x, surface.normal_y,
+                    surface.normal_z, surface.depth, true};
+            }
+            emit_polygon(*settings_.sink, raster_polygon, material.colour,
+                material.texture, attributes);
+            continue;
+        }
+        const StoredRasterScope raster{target, settings_.render_scale};
+        for (auto& vertex : raster_polygon) {
+            scale_to_stored(vertex.point, settings_.render_scale);
+        }
         if (material.texture == nullptr) {
             fill_source_polygon(target, raster_polygon, material.colour,
                 settings_.colour_index_base, pose, surfaces, surface);

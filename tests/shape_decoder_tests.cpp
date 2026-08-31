@@ -1,13 +1,16 @@
 #include "starfox/assets/rom.hpp"
 #include "starfox/assets/shape_decoder.hpp"
+#include "starfox/gfx/software_backend.hpp"
 #include "starfox/render/dust_renderer.hpp"
 #include "starfox/render/framebuffer.hpp"
 #include "starfox/render/software_renderer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -18,6 +21,43 @@ void require(bool condition, const char* message) {
         std::exit(1);
     }
 }
+
+// Collects the renderer's clipped faces into one scene pass and hands the
+// backend's textures back to it. The renderer decides what is drawn; this
+// only decides who draws it.
+class BackendSink final : public starfox::render::PrimitiveSink {
+public:
+    BackendSink(starfox::gfx::RenderBackend& backend,
+        starfox::gfx::FrameBuilder& builder)
+        : backend_(backend), builder_(builder) {}
+
+    void add(const starfox::gfx::Primitive& primitive) override {
+        builder_.add_primitive(primitive);
+    }
+
+    [[nodiscard]] starfox::gfx::TextureHandle texture_for(
+        const starfox::assets::TextureImage& texture) override {
+        const auto key = reinterpret_cast<std::uintptr_t>(&texture);
+        const auto found = handles_.find(key);
+        if (found != handles_.end()) return found->second;
+        starfox::gfx::TextureDescription description;
+        description.indices = texture.texels;
+        description.width = static_cast<std::uint32_t>(texture.u_mask) + 1U;
+        description.height = static_cast<std::uint32_t>(texture.v_mask) + 1U;
+        const auto handle = backend_.create_texture(description);
+        handles_.emplace(key, handle);
+        return handle;
+    }
+
+    [[nodiscard]] bool records_surfaces() const noexcept override {
+        return true;
+    }
+
+private:
+    starfox::gfx::RenderBackend& backend_;
+    starfox::gfx::FrameBuilder& builder_;
+    std::unordered_map<std::uintptr_t, starfox::gfx::TextureHandle> handles_;
+};
 
 std::size_t offset(std::uint32_t address) {
     return static_cast<std::size_t>((address >> 16U) & 0x7fU) * 0x8000U
@@ -244,6 +284,63 @@ int main() {
     require(coloured_pixels > 50, "decoded shape did not render a visible polygon");
     require(surface_pixels == coloured_pixels,
             "rendered polygon did not retain per-pixel surface metadata");
+    // The same faces, drawn through the backend layer instead of the
+    // built-in fill. Everything above the fill - projection, visibility,
+    // clipping and draw order - still ran in the source's own arithmetic, so
+    // what a backend receives is already decided; only who rasterises it
+    // changed. The record has to survive that change or the three
+    // surface-driven options go dark the moment a backend draws.
+    starfox::gfx::SoftwareBackend backend;
+    require(backend.initialise({}), "reference backend refused to initialise");
+    starfox::gfx::FrameBuilder builder;
+    builder.reset(224U, 192U, 0U);
+    builder.begin_scene(0, 0, 224U, 192U);
+    BackendSink sink{backend, builder};
+    auto sink_settings = starfox::render::RenderSettings{180.0, false, 0};
+    sink_settings.sink = &sink;
+    const starfox::render::SoftwareRenderer sink_renderer{sink_settings};
+    starfox::render::Framebuffer unused_target{224, 192};
+    sink_renderer.draw(shape, {}, unused_target);
+    require(builder.primitive_count() > 0U,
+            "no face reached the backend through the sink");
+    const std::vector<starfox::render::Rgba8> flat_palette(256U);
+    const auto sink_frame = builder.build(flat_palette);
+    starfox::gfx::RenderOptions sink_options;
+    sink_options.record_surfaces = true;
+    require(backend.render(sink_frame, sink_options),
+            "the reference backend could not draw the emitted faces");
+    std::uint32_t sink_width = 0U;
+    std::uint32_t sink_height = 0U;
+    std::vector<starfox::gfx::SurfacePixel> sink_surfaces;
+    require(backend.read_surfaces(sink_width, sink_height, sink_surfaces)
+                && sink_width == 224U && sink_height == 192U,
+            "the backend did not record the faces it filled");
+    std::size_t agreeing_pixels = 0;
+    std::size_t sink_recorded = 0;
+    for (std::uint32_t y = 0U; y < 192U; ++y) {
+        for (std::uint32_t x = 0U; x < 224U; ++x) {
+            const auto& emitted = sink_surfaces[
+                static_cast<std::size_t>(y) * 224U + x];
+            const auto& filled = surfaces.get(x, y);
+            sink_recorded += emitted.surface.recorded;
+            if (!emitted.surface.recorded || !filled.valid) continue;
+            const auto matches =
+                std::fabs(emitted.surface.normal_x - filled.normal_x) < 1e-5F
+                && std::fabs(emitted.surface.normal_y - filled.normal_y) < 1e-5F
+                && std::fabs(emitted.surface.normal_z - filled.normal_z) < 1e-5F
+                && std::fabs(emitted.surface.depth - filled.depth) < 1e-3F
+                && emitted.palette_index == filled.palette_index;
+            agreeing_pixels += matches;
+        }
+    }
+    require(sink_recorded > 50U,
+            "the backend recorded almost none of the face it drew");
+    // The two rasterisers settle a boundary pixel differently, so agreement
+    // is measured against what both covered rather than demanded pixel for
+    // pixel.
+    require(agreeing_pixels * 100U > sink_recorded * 95U,
+            "the emitted record disagreed with what the built-in fill wrote");
+
     starfox::render::Framebuffer wireframe{224, 192};
     starfox::render::RenderPose wireframe_pose;
     wireframe_pose.wireframe_mode = 1U;

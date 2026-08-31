@@ -20,6 +20,22 @@ constexpr std::array<DisplayMode, 5> kDisplayModes{
     DisplayMode::ultrawide_21_9,
     DisplayMode::super_ultrawide_32_9,
 };
+constexpr std::array<RendererKind, renderer_kind_count> kRendererKinds{
+    RendererKind::software,
+    RendererKind::opengl,
+};
+constexpr std::array<RenderScale, render_scale_count> kRenderScales{
+    RenderScale::scale_1x,
+    RenderScale::scale_2x,
+    RenderScale::scale_3x,
+    RenderScale::scale_4x,
+    RenderScale::scale_5x,
+    RenderScale::scale_6x,
+    RenderScale::scale_7x,
+    RenderScale::scale_8x,
+    RenderScale::scale_9x,
+    RenderScale::scale_10x,
+};
 constexpr std::array<CrosshairColour, 8> kCrosshairColours{
     CrosshairColour::green,
     CrosshairColour::white,
@@ -958,6 +974,8 @@ void GameSimulation::enter_pregame_menu() {
     msu1_music_ = false;
     rumble_ = true;
     crosshair_colour_ = CrosshairColour::green;
+    render_scale_ = RenderScale::scale_1x;
+    renderer_kind_ = RendererKind::software;
     armed_god_nukes_.clear();
     flow_ticks_ = 0U;
     frontend_frames_ = 0U;
@@ -988,7 +1006,7 @@ GameTickResult GameSimulation::tick_pregame_menu(
 
     const auto previous_selection = pregame_selection_;
     const auto selection_count = pregame_page_ == PregamePage::main
-        ? std::uint8_t{14U} : std::uint8_t{5U};
+        ? std::uint8_t{14U} : std::uint8_t{7U};
     if ((input.pressed & starfox::input::up) != 0U) {
         pregame_selection_ = static_cast<std::uint8_t>(
             (pregame_selection_ + selection_count - 1U) % selection_count);
@@ -1000,7 +1018,7 @@ GameTickResult GameSimulation::tick_pregame_menu(
 
     if (pregame_page_ == PregamePage::options) {
         const auto go_back = (input.pressed & starfox::input::b) != 0U
-            || (pregame_selection_ == 4U
+            || (pregame_selection_ == 6U
                 && (input.pressed & (starfox::input::a
                     | starfox::input::select)) != 0U);
         if (go_back) {
@@ -1037,6 +1055,42 @@ GameTickResult GameSimulation::tick_pregame_menu(
                 index = (index + 1U) % kCrosshairColours.size();
             }
             crosshair_colour_ = kCrosshairColours[index];
+            queue_sound_effect(0x11U);
+        } else if (pregame_selection_ == 3U
+                   && (input.pressed & (starfox::input::left
+                       | starfox::input::right | starfox::input::select
+                       | starfox::input::a)) != 0U) {
+            const auto found = std::find(
+                kRenderScales.begin(), kRenderScales.end(), render_scale_);
+            auto index = found == kRenderScales.end()
+                ? std::size_t{}
+                : static_cast<std::size_t>(
+                    std::distance(kRenderScales.begin(), found));
+            if ((input.pressed & starfox::input::left) != 0U) {
+                index = (index + kRenderScales.size() - 1U)
+                    % kRenderScales.size();
+            } else {
+                index = (index + 1U) % kRenderScales.size();
+            }
+            render_scale_ = kRenderScales[index];
+            queue_sound_effect(0x11U);
+        } else if (pregame_selection_ == 4U
+                   && (input.pressed & (starfox::input::left
+                       | starfox::input::right | starfox::input::select
+                       | starfox::input::a)) != 0U) {
+            const auto found = std::find(
+                kRendererKinds.begin(), kRendererKinds.end(), renderer_kind_);
+            auto index = found == kRendererKinds.end()
+                ? std::size_t{}
+                : static_cast<std::size_t>(
+                    std::distance(kRendererKinds.begin(), found));
+            if ((input.pressed & starfox::input::left) != 0U) {
+                index = (index + kRendererKinds.size() - 1U)
+                    % kRendererKinds.size();
+            } else {
+                index = (index + 1U) % kRendererKinds.size();
+            }
+            renderer_kind_ = kRendererKinds[index];
             queue_sound_effect(0x11U);
         }
         result.audio_port_writes = map_.take_apu_port_writes();
