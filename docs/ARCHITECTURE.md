@@ -86,6 +86,44 @@ presentation loop to interpolate only world/camera transforms.
 2D backgrounds, HUD, sprite priority, color math, and window effects are a
 separate PPU-facing layer. They must not be folded into the 3D model renderer.
 
+## Graphics-API boundary
+
+The whole graphics-API surface sits behind one interface in `starfox::gfx`, so
+adding a technology is one translation unit and one registry entry rather than
+a rewrite. Nothing in `render_backend.hpp` names a graphics API, a windowing
+library, or a platform.
+
+The line is drawn where the cartridge stops deciding. Projection, face
+visibility, near and screen clipping, and draw order all run in the source's
+own fixed-point arithmetic above the boundary; a backend receives faces that
+are already clipped and already ordered, in source raster units with the
+fraction kept, and rasterizes and composites them. Submission order is the
+contract, because that is how the source decides what covers what: there is no
+depth buffer and no sorting below the line.
+
+Two things travel with those faces, and both are requirements rather than
+extras:
+
+- The frame comes back as palette indices. The port composites its layers,
+  fades them, and post-processes them in index space, so a backend that can
+  only return color cannot stand in for the built-in fill.
+- Filling a face also records that face's camera-space normal and mean depth
+  for every pixel it covers. `ENHANCED GRAPHICS`, `SMOOTH POLYS`, and
+  `RTX LIGHTING` read that record instead of guessing surface orientation from
+  palette brightness. It is the largest per-frame allocation at a high render
+  scale, so it is only produced when one of those three is on. Lines and
+  cartridge art cover pixels without claiming a surface, in both the built-in
+  fill and every backend.
+
+`Capabilities` states whether a backend can do each of those; the runtime
+refuses one that cannot and falls back to software with a diagnostic, rather
+than presenting a blank screen or three silently dead options. `RenderOptions`
+is a request a backend may clamp and report back through `applied_options()`,
+which is how the render scale and the surface record are negotiated.
+
+The reference software backend needs no device, so it runs in the tests and on
+a build machine and is the yardstick a device backend is measured against.
+
 ## Logic-port boundary
 
 Port subsystems in this order:

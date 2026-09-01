@@ -102,7 +102,7 @@ int gamepad_preference(SDL_JoystickID identifier) {
 // Pre-game settings file format. Bump kPregameRevision when a field is added;
 // the reader accepts every revision up to it.
 constexpr std::string_view kPregameTag{"SFE_PREGAME_V"};
-constexpr int kPregameRevision = 7;
+constexpr int kPregameRevision = 8;
 
 std::filesystem::path settings_path() {
     char* preference_path = SDL_GetPrefPath("StarFoxEnhanced", "StarFoxEnhanced");
@@ -466,12 +466,13 @@ bool load_pregame_settings(
     if (revision < 1 || revision > kPregameRevision) return false;
 
     auto loaded = PregameSettings{};
-    std::array<bool, 15> found{};
+    std::array<bool, 16> found{};
     if (revision < 6) {
         found[12] = true;
         found[13] = true;
     }
     found[14] = revision < 7;
+    found[15] = revision < 8;
     found[6] = revision == 1;
     if (revision <= 2) {
         std::fill(found.begin() + 7, found.end(), true);
@@ -530,6 +531,9 @@ bool load_pregame_settings(
         } else if (name == "RENDER_SCALE") {
             loaded.render_scale = static_cast<std::uint8_t>(value);
             found[14] = value >= 0 && value <= 9;
+        } else if (name == "RENDERER") {
+            loaded.renderer_kind = static_cast<std::uint8_t>(value);
+            found[15] = value >= 0 && value <= 1;
         }
     }
     if (!std::all_of(found.begin(), found.end(),
@@ -551,7 +555,8 @@ bool save_pregame_settings(
     if (path.empty() || settings.timing_mode > 1U
         || settings.display_mode > 4U || settings.crosshair_colour > 7U
         || settings.anti_aliasing > 3U
-        || settings.experience > 1U || settings.render_scale > 9U) {
+        || settings.experience > 1U || settings.render_scale > 9U
+        || settings.renderer_kind > 1U) {
         return false;
     }
     constexpr std::array<std::uint16_t, 8> valid_fps{
@@ -585,7 +590,9 @@ bool save_pregame_settings(
            << "CROSSHAIR_COLOUR "
            << static_cast<unsigned>(settings.crosshair_colour) << '\n'
            << "RENDER_SCALE "
-           << static_cast<unsigned>(settings.render_scale) << '\n';
+           << static_cast<unsigned>(settings.render_scale) << '\n'
+           << "RENDERER "
+           << static_cast<unsigned>(settings.renderer_kind) << '\n';
     return static_cast<bool>(output);
 }
 

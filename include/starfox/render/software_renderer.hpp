@@ -2,6 +2,7 @@
 
 #include "starfox/assets/shape.hpp"
 #include "starfox/assets/rom.hpp"
+#include "starfox/gfx/draw_list.hpp"
 #include "starfox/render/framebuffer.hpp"
 #include "starfox/simulation/math.hpp"
 
@@ -76,6 +77,30 @@ void apply_source_depth_tables(
     std::uint8_t object_depth_offset,
     RenderPose& pose);
 
+// Where clipped faces go instead of the built-in fill. The renderer decides
+// what is drawn; a sink decides who draws it. Attaching one leaves every
+// decision above it untouched.
+class PrimitiveSink {
+public:
+    virtual ~PrimitiveSink() = default;
+    PrimitiveSink(const PrimitiveSink&) = delete;
+    PrimitiveSink& operator=(const PrimitiveSink&) = delete;
+
+    virtual void add(const gfx::Primitive& primitive) = 0;
+    // Backends own their textures; the renderer only knows the decoded image.
+    [[nodiscard]] virtual gfx::TextureHandle texture_for(
+        const assets::TextureImage& texture) = 0;
+    // A sink that feeds the surface effects needs each face's normal and
+    // depth. One that does not should not pay for working them out, so the
+    // renderer asks before it computes them.
+    [[nodiscard]] virtual bool records_surfaces() const noexcept {
+        return false;
+    }
+
+protected:
+    PrimitiveSink() = default;
+};
+
 struct RenderSettings {
     // MOBJ.MC projects with (coordinate * 256) / z before adding the
     // 112x96 vanishing point.
@@ -90,6 +115,9 @@ struct RenderSettings {
     // visibility and clipping stay on the source raster at every setting, so
     // the geometry drawn is identical and scale-independent.
     std::uint32_t render_scale{1U};
+    // When set, faces are emitted here in source units and the built-in fill
+    // is skipped: the backend applies the scale instead.
+    PrimitiveSink* sink{};
 };
 
 // Presentation metadata for a host-rendered Super FX surface. The indexed

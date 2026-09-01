@@ -5574,10 +5574,23 @@ int main(int argc, char** argv) {
                     == starfox::simulation::RenderScale::scale_1x,
                 "render scale selector did not wrap forward to native");
         drive_boot({0, starfox::input::down, 0});
-        require(boot_game.pregame_selection() == 4U,
-                "pre-game cursor did not reach CUSTOMIZE SCREEN");
+        require(boot_game.pregame_selection() == 4U
+                    && boot_game.renderer_kind()
+                        == starfox::simulation::RendererKind::software,
+                "pre-game cursor did not reach the software renderer");
+        drive_boot({0, starfox::input::right, 0});
+        require(boot_game.renderer_kind()
+                    == starfox::simulation::RendererKind::opengl,
+                "renderer selector did not advance to OpenGL");
+        drive_boot({0, starfox::input::left, 0});
+        require(boot_game.renderer_kind()
+                    == starfox::simulation::RendererKind::software,
+                "renderer selector did not step back to software");
         drive_boot({0, starfox::input::down, 0});
         require(boot_game.pregame_selection() == 5U,
+                "pre-game cursor did not reach CUSTOMIZE SCREEN");
+        drive_boot({0, starfox::input::down, 0});
+        require(boot_game.pregame_selection() == 6U,
                 "pre-game cursor did not reach OPTIONS BACK");
         drive_boot({0, starfox::input::a, 0});
         require(boot_game.pregame_page()
@@ -5593,7 +5606,9 @@ int main(int argc, char** argv) {
                     && boot_game.crosshair_colour()
                         == starfox::simulation::CrosshairColour::green
                     && boot_game.render_scale()
-                        == starfox::simulation::RenderScale::scale_1x,
+                        == starfox::simulation::RenderScale::scale_1x
+                    && boot_game.renderer_kind()
+                        == starfox::simulation::RendererKind::software,
                 "OPTIONS did not retain its toggles when returning to setup");
         drive_boot({0, starfox::input::down, 0});
         require(boot_game.pregame_selection() == 13U,
